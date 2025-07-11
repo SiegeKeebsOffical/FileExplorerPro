@@ -10,6 +10,8 @@ I made this entirely for personal use, but after the program started growing and
 ### Issues & Feedback wanted:
 Biggest issue I'm aware of: This program absolutely EATS RAM. I think because I'm not chunking files and only loading partial/visibile files, but instead just loading everything? I used to do chunking in earlier iterations but it was so much clunkier and I don't think I implemented it well...
 
+I strongly suggest not using the program to organize images - I find it uses an acceptable amount of RAM when looking at a few hundred checkpoints or lora at a time, but loading up thousands of images will consume a ton of ram
+
 I use this program alongside StabilityMatrix - as it downloads a <checkpointName>.preview.<imgext> and <checkpointName>.cm-info.json file that this program utilizes which is very convenient. Not necessary though
 
 There's no cloud integration or integration with civitai or comfyui or anything fancy. Everything is all totally local
