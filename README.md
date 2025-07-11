@@ -8,4 +8,6 @@ Biggest issue I'm aware of: This program absolutely EATS RAM. I think because I'
 
 I use this program alongside StabilityMatrix - as it downloads a <checkpointName>.preview.<imgext> and <checkpointName>.cm-info.json file that this program utilizes which is very convenient. Not necessary though
 
+There's no cloud integration or integration with civitai or comfyui or anything fancy. Everything is all totally local
+
 ![Rate Files](Images/Rate-Files.webp)
