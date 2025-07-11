@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Browser</title>
+    <!-- Link to external stylesheet -->
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Add Tailwind CSS and Font Awesome links for styling and icons -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="initialSetupOverlay" class="modal-overlay hidden"></div>
+
+    <div id="initialSetupModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Welcome!</h2>
+            </div>
+            <div class="modal-body">
+                <p>Please configure your parent directory (usually your comfyui folder) and image gallery directory (will be used to find images to display examples of lora and checkpoints) to begin.</p>
+                <div class="setting-field">
+                    <label for="initialStartPath">Parent Directory: </label>
+                    <input type="text" id="initialStartPath" placeholder="/path/to/your/default/folder">
+                </div>
+                <div class="setting-field">
+                    <label for="initialImageDirectory">Image Gallery Directory:</label>
+                    <input type="text" id="initialImageDirectory" placeholder="/path/to/your/image/gallery">
+                </div>
+                <p id="initialSetupError" class="error-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="saveInitialPathsBtn">Save Paths</button>
+            </div>
+        </div>
+    </div>
+    <div class="toolbar">
+        <button id="upButton">↑ Up</button>
+        <input type="text" id="searchInput" placeholder="Search files...">
+        <select id="displayRatingCategory">
+            <option value="overall">Overall Rating</option>
+        </select>
+        <label for="hideFoldersToggle" class="toolbar-toggle-button">
+            <input type="checkbox" id="hideFoldersToggle">
+            Hide Folders
+        </label>
+        <label for="showSubfolderContentToggle" class="toolbar-toggle-button">
+            <input type="checkbox" id="showSubfolderContentToggle">
+            Recursive Files
+        </label>
+        <label for="showHiddenFilesToggle" class="toolbar-toggle-button">
+            <input type="checkbox" id="showHiddenFilesToggle">
+            Show Hidden Files
+        </label>
+        <button id="toggleDirConfigMode">
+            ️ Configure Directories</button>
+        <button id="darkModeToggle">🌙 Dark Mode</button>
+
+        <div class="zoom-controls">
+            <button id="zoomOutBtn">➖</button>
+            <!-- Updated zoomSlider: min="10" (current 100%), max="500" (current 1000%), value="100" (current 500%) -->
+            <input type="range" id="zoomSlider" min="10" max="500" value="100">
+            <button id="zoomInBtn">➕</button>
+            <span id="zoomPercent">100%</span>
+        </div>
+        <button id="settingsBtn">⚙️ Settings</button>
+        <button id="manageRatingsBtn">⭐ Manage Ratings</button>
+        <button id="filterBtn">🔍 Filter</button> <!-- Added filter button -->
+        <button id="refreshBtn">🔄 Refresh</button> <!-- Added refresh button -->
+    </div>
+
+    <div class="breadcrumb" id="breadcrumb">
+        <div class="breadcrumb-path">
+            <span id="currentPathDisplay">Loading...</span> <!-- Updated ID for consistency -->
+        </div>
+        <div class="breadcrumb-actions">
+            <div id="sortButtons" class="sort-buttons">
+                <button class="sort-button" data-sort-key="name">Name</button>
+                <button class="sort-button" data-sort-key="modified">Date</button>
+                <button class="sort-button" data-sort-key="size">Size</button>
+                <button class="sort-button" data-sort-key="type">Type</button>
+                <button class="sort-button" data-sort-key="rating">Rating</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div id="folderTree"></div>
+            <div class="mt-4">
+                <h3 class="text-lg font-semibold text-gray-800 mb-2">Drives</h3>
+                <div id="driveList" class="space-y-1">
+                    <!-- Drives will be listed here -->
+                </div>
+            </div>
+        </div>
+
+        <div class="content-area">
+            <div id="fileGrid" class="file-grid medium"></div>
+            <div id="loading" class="loading hidden">Loading...</div>
+        </div>
+    </div>
+
+    <div id="fileDetails" class="file-details">
+        <div class="details-header">
+            <h2>File Details</h2>
+            <button class="close-details" id="closeFileDetailsBtn">×</button>
+        </div>
+
+        <div id="detailsContent"></div>
+        <button id="hideFileButton" style="width: 100%; padding: 8px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px;">Hide File</button>
+    </div>
+
+    <div class="status-bar" id="statusBar">Ready</div>
+
+    <div id="settingsModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="close-modal" id="closeSettingsModalBtn">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-field">
+                    <label for="startPathInput">Default Start Path:</label>
+                    <input type="text" id="startPathInput" style="width: 100%"> <!-- Updated ID -->
+                </div>
+                <div class="setting-field">
+                    <label for="imageDirectoryInput">Image Gallery Directory:</label>
+                    <input type="text" id="imageDirectoryInput" style="width: 100%"> <!-- Updated ID -->
+                </div>
+                <div class="setting-field">
+                    <label for="openGalleryAutomatically">
+                        <input type="checkbox" id="openGalleryAutomatically">
+                        Open Focus Window to Gallery Automatically
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="saveSettingsBtn">Save</button>
+                <button id="cancelSettingsBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ratingConfigModal" class="modal hidden">
+        <div class="modal-content flex flex-col h-full"> <!-- Added flex flex-col h-full -->
+            <div class="modal-header">
+                <h2>Manage Rating Categories</h2>
+                <button class="close-modal" id="closeRatingConfigModalBtn">×</button>
+            </div>
+            <div class="modal-body overflow-y-auto max-h-[75vh] flex-grow"> <!-- Added flex-grow -->
+                <div class="rating-config-section">
+                    <h4>Rating Definitions</h4>
+                    <ul id="ratingDefinitionsList" class="rating-list">
+                        </ul>
+                    <div class="add-rating-input">
+                        <input type="text" id="newRatingDefinitionInput" placeholder="New rating category name"> <!-- Updated ID -->
+                        <button id="addRatingDefBtn">Add</button>
+                    </div>
+                </div>
+
+                <div class="rating-config-section">
+                    <h4>Category to Rating Mappings</h4>
+                    <div id="categoryRatingMappingContainer">
+                        <!-- Checkboxes generated here will use onchange="handleCategoryRatingCheckbox(this)" -->
+                        </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="applySmartCategoriesBtn">Apply Smart Default Categories</button>
+                <button id="saveRatingConfigBtn">Save</button>
+                <button id="cancelRatingConfigBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="filterModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Filter Files by Tags</h2>
+                <button class="close-modal" id="closeFilterModalBtn">×</button>
+            </div>
+            <div class="modal-body filter-modal-body">
+                <div class="filter-section">
+                    <h4>Add Tags to Filter</h4>
+                    <input type="text" id="filterTagInput" placeholder="Type to add or suggest tags...">
+                    <div id="filterSuggestedTagsContainer" class="filter-suggested-tags-container">
+                        </div>
+                </div>
+                <div class="filter-section">
+                    <h4>Active Filters</h4>
+                    <div id="activeFilterTagsContainer" class="active-filter-tags-container">
+                        </div>
+                    <button id="clearFilterTagsBtn" style="margin-top: 10px;">Clear All Filters</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="applyFilterBtn">Apply Filter</button>
+                <button id="cancelFilterModalBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="focusOverlay" class="focus-overlay">
+        <div id="gallerySidebar" class="gallery-sidebar hidden">
+            <div class="gallery-controls">
+                <input type="range" id="galleryZoomSlider" min="100" max="600" value="100" class="w-full">
+            </div>
+            <div id="galleryImagesContainer">
+                </div>
+        </div>
+
+        <div id="focusMainContent" class="focus-main-content">
+            <img id="focusImage" class="focus-media hidden" src="" alt="File Preview">
+            <video id="focusVideo" class="focus-media hidden" controls autoplay loop muted>
+                <source src="" type="video/mp4">
+            </video>
+            <img id="focusGalleryImage" class="focus-media hidden" src="" alt="Gallery Image">
+            <video id="focusGalleryVideo" class="focus-media hidden" controls autoplay loop muted>
+                <source src="" type="video/mp4">
+            </video>
+            <div id="noPreviewText" class="no-preview-text hidden">No preview available</div>
+            <div id="focusFileNameDisplay" class="focus-file-name-display hidden"></div> <!-- New element for filename -->
+            </div>
+    </div>
+
+    <!-- Custom Confirmation Dialog -->
+    <div id="customConfirmOverlay" class="hidden">
+        <div id="customConfirmBox" class="bg-white p-8 rounded-lg shadow-xl">
+            <p id="customConfirmMessage" class="mb-6"></p>
+            <div id="customConfirmButtons" class="flex justify-center gap-4">
+                <button id="customConfirmCancel" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">Cancel</button>
+                <button id="customConfirmOK" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Context Menu -->
+    <div id="contextMenu" class="context-menu hidden">
+        <div id="contextMenuOpenFileLocation" class="context-menu-item">Open File Location</div>
+        <!-- Add more context menu items here if needed -->
+    </div>
+
+    <!-- Link to external JavaScript file -->
+    <script type="module" src="/static/script.js"></script>
+
+</body>
+</html>

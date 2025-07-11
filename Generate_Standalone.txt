@@ -1,0 +1,6 @@
+pyinstaller --noconfirm --onefile --windowed ^
+--add-data "templates;templates" ^
+--add-data "static;static" ^
+--hidden-import "workflow_analysis" ^
+--icon "favicon.ico" ^
+main.py
