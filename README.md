@@ -24,3 +24,5 @@ There's no cloud integration or integration with civitai or comfyui or anything 
 - UI Fixes
 - Multi-selection and Bulk editing
 - Persistence issue with 'Configure Directories' when new directories are added
+  - Allow the user to configure directories *before* creating the db, limiting the files hashed
+  - Allow the user to configure file types to be exclusively included
