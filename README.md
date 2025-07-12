@@ -17,3 +17,10 @@ I use this program alongside StabilityMatrix - as it downloads a <checkpointName
 There's no cloud integration or integration with civitai or comfyui or anything fancy. Everything is all totally local
 
 ![Rate Files](Images/Rate-Files.webp)
+
+### Bugs & Features To Do:
+- Metadata viewing for alternative image generation programs
+- "implementing a hybrid of pagination, lazy loading, caching & .db indexing" to reduce RAM usage
+- UI Fixes
+- Multi-selection and Bulk editing
+- Persistence issue with 'Configure Directories' when new directories are added
