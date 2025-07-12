@@ -19,7 +19,6 @@ There's no cloud integration or integration with civitai or comfyui or anything 
 ![Rate Files](Images/Rate-Files.webp)
 
 ### Bugs & Features To Do:
-- Gallery images not found (this one is driving me crazy)
 - Metadata viewing for alternative image generation programs
 - "implementing a hybrid of pagination, lazy loading, caching & .db indexing" to reduce RAM usage
 - UI Fixes
