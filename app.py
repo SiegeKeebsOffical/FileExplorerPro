@@ -2019,8 +2019,9 @@ def get_gallery_images():
             search_term = result['custom_gallery_keyword']
             # Ensure that if the DB value is '0', it's treated as empty for search
             if search_term == '0':
-                search_term = ''
-            print(f"Using custom gallery keyword: {search_term} for {filepath}")
+                search_term = os.path.splitext(os.path.basename(filepath))[0]
+            else:
+                print(f"Using custom gallery keyword: {search_term} for {filepath}")
         else:
             # If no custom keyword, use the filename without extension as search term
             # This is derived from the *provided* filepath, not necessarily an existing file
@@ -2033,7 +2034,7 @@ def get_gallery_images():
         search_term = search_term.lower()
 
         gallery_images = []
-        allowed_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
+        allowed_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.webm')
         gallery_max_images = 100
 
         # Determine the directory to search in. If image_directory is configured, use it.
