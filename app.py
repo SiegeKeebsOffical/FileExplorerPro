@@ -745,8 +745,9 @@ def get_tree():
                 for d in dirs:
                     item_path = safe_join(path, d)
                     # Check if item_path is a valid directory before os.listdir for children
+                    is_dir = os.path.isdir(item_path) # Check if it's actually a directory
                     has_children = False
-                    if os.path.isdir(item_path):
+                    if is_dir: # Only check for children if it's a directory
                         try:
                             has_children = any(
                                 os.path.isdir(os.path.join(item_path, x)) for x in os.listdir(item_path) if
@@ -762,7 +763,7 @@ def get_tree():
                     node = {
                         'name': d,
                         'path': item_path,
-                        'is_dir': True,
+                        'is_dir': True, # Always true for directories in the tree view
                         'has_children': has_children,
                         'children': generate_tree(item_path, current_depth + 1) if has_children else []
                     }
@@ -846,6 +847,7 @@ def get_files():
     Get files in a directory, prioritizing primary files and their associated data.
     Supports showing content from subfolders and hiding directories based on flags.
     Optimized for CPU by bulk fetching metadata and selectively updating.
+    Now supports pagination.
     """
     directory = request.args.get('path', os.path.expanduser('~'))
     sort_by = request.args.get('sort', 'name')
@@ -857,10 +859,15 @@ def get_files():
     show_subfolder_content = request.args.get('show_subfolder_content', 'false').lower() == 'true'
     show_hidden_files = request.args.get('show_hidden_files', 'false').lower() == 'true'
 
+    # Pagination parameters
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('page_size', 50))
+    offset = (page - 1) * page_size
+
     # Parse filter tags into a set for efficient lookup
     filter_tags = {tag.strip().lower() for tag in filter_tags_str.split(',') if tag.strip()}
 
-    print(f"DEBUG: get_files called for directory: {directory}")
+    print(f"DEBUG: get_files called for directory: {directory}, Page: {page}, PageSize: {page_size}")
     print(
         f"DEBUG: hide_folders: {hide_folders}, show_subfolder_content: {show_subfolder_content}, show_hidden_files: {show_hidden_files}")
     print(f"DEBUG: Sorting by: {sort_by}, order: {sort_order}, requested rating category: {display_rating_category}")
@@ -878,7 +885,7 @@ def get_files():
         # Define primary content extensions (models, videos, and general images)
         primary_content_extensions = ['.safetensors', '.ckpt', '.pt', '.pth', '.webm', '.jpg', '.jpeg', '.png', '.webp',
                                       '.gif', '.gguf', '.json']
-        # Define preview image extensions (specifically those with '.preview' in their name)
+        # Define preview image extensions (specifically those with '.preview')
         preview_extensions = ['.preview.jpeg', '.preview.jpg', '.preview.png', '.preview.webp', 'preview.webm', '.preview.gif']
         # Define metadata extensions
         metadata_extensions = ['.cm-info.json', '.info.json', '.meta.json', '.metadata.json']
@@ -1359,7 +1366,6 @@ def get_files():
                         file_info['workflow_metadata'] = None
                 primary_files_info.append(file_info)
                 # Removed debug print for appending DB-only file_info
-
         conn.commit()  # Final commit for any remaining DB-only updates (though most should be handled above)
         # Removed debug print for primary file selection count
 
@@ -1406,10 +1412,15 @@ def get_files():
                 key=lambda x: (0 if x['is_directory'] else 1, float(x['ratings'].get(display_rating_category, 0))),
                 reverse=reverse)
 
+        total_filtered_count = len(filtered_items)
+        paginated_files = filtered_items[offset:offset + page_size]
+
+
         return jsonify({
-            'files': filtered_items,
+            'files': paginated_files,
             'path': directory,
-            'count': len(filtered_items)
+            'count': len(paginated_files), # Count of files on this page
+            'total_count': total_filtered_count # Total count of all filtered files
         })
 
     except PermissionError:
@@ -2122,3 +2133,4 @@ if __name__ == '__main__':
         os.makedirs(resource_path('templates'), exist_ok=True)
 
     app.run(debug=True, port=5000)
+
