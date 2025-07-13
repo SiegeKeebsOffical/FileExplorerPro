@@ -19,6 +19,23 @@ export function initializeFileOperations(state) {
 }
 
 /**
+ * Forces a repaint of the file grid element.
+ * This is a workaround to ensure the browser visually updates the grid
+ * when other methods (like renderVirtualizedGrid(true)) might be optimized away.
+ */
+function forceGridRepaint() {
+    const grid = globalState.fileGrid;
+    if (grid) {
+        // Temporarily change a CSS property that forces a repaint, then revert it.
+        // Using 'visibility' or 'transform' is generally less disruptive than 'display'.
+        grid.style.visibility = 'hidden';
+        // Accessing offsetHeight forces a reflow and repaint.
+        grid.offsetHeight;
+        grid.style.visibility = 'visible';
+    }
+}
+
+/**
  * Loads initial data for the file browser, including the folder tree and files for the current path.
  */
 export async function loadInitialData() {
@@ -58,7 +75,8 @@ export async function loadInitialData() {
  * @param {string} path - The directory path to load files from.
  */
 export async function loadFiles(path) {
-    uiManager.showLoading(true); // Show loading indicator
+    uiManager.showLoading(true); // Show loading indicator and ensure grid is cleared
+
     try {
         // Get current sorting, display, and filter parameters from global state and DOM
         const sortBy = globalState.currentSortKey;
@@ -122,12 +140,16 @@ export async function loadFiles(path) {
         // Sort categories alphabetically and populate the dropdown using uiManager
         uiManager.populateDisplayRatingCategoryDropdown(Array.from(uniqueRatingCategories).sort());
 
-        // Render files in the grid using uiManager's function
-        uiManager.renderFiles(globalState.currentFiles, selectFile, { // Changed from renderFileGrid to renderFiles
-            displayRatingCategory: displayRatingCategory,
-            hideFolders: globalState.hideFolders,
-            showHiddenFiles: globalState.showHiddenFiles
-        });
+        // Recalculate dimensions and explicitly trigger rendering after data is loaded
+        globalState.calculateGridDimensions();
+        // Force an immediate render, bypassing the comparison check
+        globalState.renderVirtualizedGrid(true, true);
+
+        // The "Insurance timer" is still here as a fallback, but the forceRenderBypassCheck should be more reliable.
+        setTimeout(() => {
+            globalState.renderVirtualizedGrid(true, true); // Re-trigger with force bypass
+        }, 50); // 50ms delay
+
         uiManager.updateBreadcrumb(data.path); // Update breadcrumb navigation
         updateUpButton(); // Corrected: Call updateUpButton directly
         uiManager.updateStatusBar(`${data.count} items`); // Update status bar
@@ -164,7 +186,8 @@ export async function navigateToFolder(path) {
             return; // Prevent normal navigation in config mode
         }
 
-        // Load files for the new path (this will also update breadcrumb and status bar)
+        // uiManager.showLoading(true) is called within loadFiles,
+        // which now handles the immediate clearing and scroll reset.
         await loadFiles(globalState.currentPath);
 
         // Highlight the current folder in the tree
@@ -269,12 +292,8 @@ export function navigateToPreviousFile(forceFileNavigation = false) {
                 }
 
                 if (previousFile) { // Ensure a valid file was found
-                    const targetElement = document.querySelector(`.file-item[data-path="${CSS.escape(previousFile.path)}"]`);
-                    if (targetElement) {
-                        selectFile(previousFile, targetElement);
-                    } else {
-                        console.warn("Previous file element not found in DOM:", previousFile.path);
-                    }
+                    globalState.selectFile(previousFile, null); // Select the file (null element as it might not be rendered yet)
+                    globalState.scrollToFile(previousFile); // Scroll to the file
                 } else {
                     console.log("No previous file to navigate to.");
                 }
@@ -305,12 +324,8 @@ export function navigateToNextFile(forceFileNavigation = false) {
                 }
 
                 if (nextFile) { // Ensure a valid file was found
-                    const targetElement = document.querySelector(`.file-item[data-path="${CSS.escape(nextFile.path)}"]`);
-                    if (targetElement) {
-                        selectFile(nextFile, targetElement);
-                    } else {
-                        console.warn("Next file element not found in DOM:", nextFile.path);
-                    }
+                    globalState.selectFile(nextFile, null); // Select the file (null element as it might not be rendered yet)
+                    globalState.scrollToFile(nextFile); // Scroll to the file
                 } else {
                     console.log("No next file to navigate to.");
                 }

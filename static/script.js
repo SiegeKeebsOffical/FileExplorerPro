@@ -84,6 +84,19 @@ let currentFocusedFile = null; // Global variable to hold the currently focused 
 let currentSortKey = localStorage.getItem('sortBy') || 'name'; // Current sort key (e.g., 'name', 'modified')
 let currentSortOrder = localStorage.getItem('sortOrder') || 'asc'; // Current sort order ('asc' or 'desc')
 
+// Virtualization variables
+let virtualizedScrollContainer; // The scrollable container
+let rowHeight = 0; // Height of a single file item + gap
+let colWidth = 0; // Width of a single file item + gap
+let numRowsVisible = 0; // Number of rows that can fit in the viewport
+let numColsVisible = 0; // Number of columns that can fit in the viewport
+let startIndex = 0; // Index of the first item to render
+let startIndexRendered = -1; // Keep track of the actual rendered start index
+let endIndex = 0; // Index of the last item to render
+let endIndexRendered = -1; // Keep track of the actual rendered end index
+const overscanCount = 5; // Number of extra items to render above and below the visible area
+let totalGridHeight = 0; // Total height of the grid content
+let renderLoopId = null; // For requestAnimationFrame
 
 // Import all necessary modules
 import * as utils from './src/utils.js';
@@ -110,6 +123,211 @@ let initialSetupError;
 // Bundle global state and DOM elements to pass to modules for initialization
 let globalStateBundle = {}; // Will be populated in DOMContentLoaded
 let domElementsBundle = {}; // Will be populated in DOMContentLoaded
+
+
+/**
+ * Calculates the dimensions for virtualization (row height, column width, etc.).
+ * This function should be called on initial load, window resize, and zoom changes.
+ */
+function calculateGridDimensions() {
+    if (!globalStateBundle.virtualizedScrollContainer || !globalStateBundle.fileGrid) {
+        return;
+    }
+
+    const containerWidth = globalStateBundle.virtualizedScrollContainer.clientWidth - 16; // Subtract padding
+    const containerHeight = globalStateBundle.virtualizedScrollContainer.clientHeight - 16; // Subtract padding
+
+    // Get the computed style of the file-grid to extract gap
+    const gridComputedStyle = window.getComputedStyle(globalStateBundle.fileGrid);
+    const gap = parseFloat(gridComputedStyle.getPropertyValue('gap')); // Get the gap value
+
+    // Create a dummy element to measure the actual size of a file-item based on current zoom
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.visibility = 'hidden';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.top = '-9999px';
+    // Apply the current zoom level to the tempContainer so its children inherit it for measurement
+    const cssZoomFactor = zoomManager.calculateCssZoomFactor(globalStateBundle.zoomLevel); // Get the calculated CSS factor
+    tempContainer.style.setProperty('--zoom-level', cssZoomFactor); // Apply to tempContainer
+    document.body.appendChild(tempContainer);
+
+    const dummyItem = uiManager.createFileItemElement({
+        name: 'Dummy',
+        path: '',
+        is_directory: false,
+        mime_type: 'image/png',
+        extension: '.png',
+        is_missing: false,
+        is_hidden: false,
+        ratings: {},
+        tags: ''
+    }, () => {}, { displayRatingCategory: globalStateBundle.persistedDisplayRatingCategory, showHiddenFiles: globalStateBundle.showHiddenFiles });
+
+    // Ensure the dummy item's width is set to match the grid's column width calculation
+    // This is important because grid-template-columns sets the width, and we need the height
+    // to be consistent with that width.
+    dummyItem.style.width = `calc(67px * var(--zoom-level))`; // Explicitly set width based on CSS variable
+    dummyItem.style.height = `auto`; // Let height adjust naturally based on content
+
+    tempContainer.appendChild(dummyItem);
+
+    // Force reflow to ensure styles are applied before measurement
+    dummyItem.offsetWidth; // Accessing offsetWidth forces the browser to compute layout
+
+    // Measure the actual rendered width and height of a file item
+    colWidth = dummyItem.offsetWidth + gap;
+    rowHeight = dummyItem.offsetHeight + gap;
+
+    document.body.removeChild(tempContainer); // Clean up dummy element
+
+    if (colWidth === 0 || rowHeight === 0) {
+        console.warn('Grid item dimensions are zero. Cannot calculate virtualization metrics. Defaulting to 100x100.');
+        colWidth = 100 + gap; // Fallback
+        rowHeight = 100 + gap; // Fallback
+    }
+
+    numColsVisible = Math.floor(containerWidth / colWidth);
+    if (numColsVisible === 0) numColsVisible = 1; // Ensure at least one column
+    numRowsVisible = Math.ceil(containerHeight / rowHeight);
+
+    // Calculate total height of the grid based on all files
+    const totalItems = globalStateBundle.currentFiles.length;
+    const totalRows = Math.ceil(totalItems / numColsVisible);
+    totalGridHeight = totalRows * rowHeight;
+
+    // Set the height of the fileGrid element to enable proper scrolling
+    globalStateBundle.fileGrid.style.height = `${totalGridHeight}px`;
+
+    console.log(`Grid Dimensions: containerWidth=${containerWidth}, containerHeight=${containerHeight}`);
+    console.log(`Item: colWidth=${colWidth}, rowHeight=${rowHeight}`);
+    console.log(`Visible: numColsVisible=${numColsVisible}, numRowsVisible=${numRowsVisible}`);
+    console.log(`Total: totalItems=${totalItems}, totalRows=${totalRows}, totalGridHeight=${totalGridHeight}`);
+
+    // No longer calling renderVirtualizedGrid here, it's called explicitly in loadFiles
+}
+
+/**
+ * Renders the visible portion of the file grid using virtualization.
+ * Can be called directly for immediate render or via requestAnimationFrame for smooth scrolling.
+ * @param {boolean} immediate - If true, forces an immediate render, bypassing requestAnimationFrame.
+ * @param {boolean} forceRenderBypassCheck - If true, bypasses the startIndexRendered/endIndexRendered comparison.
+ */
+function renderVirtualizedGrid(immediate = false, forceRenderBypassCheck = false) {
+    const _performGridRender = () => {
+        if (!globalStateBundle.virtualizedScrollContainer || !globalStateBundle.fileGrid || !globalStateBundle.currentFiles) {
+            return;
+        }
+
+        const scrollTop = globalStateBundle.virtualizedScrollContainer.scrollTop;
+
+        // Calculate the range of items to render
+        // Corrected virtualization logic:
+        const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscanCount);
+        const endRow = Math.min(
+            Math.ceil(globalStateBundle.currentFiles.length / numColsVisible),
+            Math.ceil(scrollTop / rowHeight) + numRowsVisible + overscanCount
+        );
+
+        const newStartIndex = startRow * numColsVisible;
+        const newEndIndex = endRow * numColsVisible;
+
+        // Debugging logs for virtualization
+        console.log(`--- Render Cycle ---`);
+        console.log(`ScrollTop: ${scrollTop}, RowHeight: ${rowHeight}, NumColsVisible: ${numColsVisible}`);
+        console.log(`Calculated Rows: startRow=${startRow}, endRow=${endRow}`);
+        console.log(`Calculated Indices: newStartIndex=${newStartIndex}, newEndIndex=${newEndIndex}`);
+        console.log(`Previously Rendered Indices: startIndexRendered=${startIndexRendered}, endIndexRendered=${endIndexRendered}`);
+
+
+        // Only re-render if the visible range has significantly changed OR if forceRenderBypassCheck is true
+        if (!forceRenderBypassCheck && newStartIndex === startIndexRendered && newEndIndex === endIndexRendered) {
+            console.log(`No significant change in render range. Skipping re-render.`);
+            return; // No need to re-render
+        }
+
+        startIndexRendered = newStartIndex;
+        endIndexRendered = newEndIndex;
+
+        // Clear the grid and re-populate
+        globalStateBundle.fileGrid.innerHTML = '';
+
+        // Calculate the vertical offset for the visible items
+        const offsetY = Math.floor(newStartIndex / numColsVisible) * rowHeight;
+        globalStateBundle.fileGrid.style.transform = `translateY(${offsetY}px)`;
+
+        // Render visible items
+        for (let i = newStartIndex; i < newEndIndex; i++) {
+            const file = globalStateBundle.currentFiles[i];
+            if (file) {
+                // Skip rendering folders if hideFolders is true
+                if (globalStateBundle.hideFolders && file.is_directory) {
+                    globalStateBundle.fileGrid.appendChild(uiManager.createPlaceholderElement()); // Add placeholder for hidden folder
+                    continue;
+                }
+                // Skip rendering hidden files if showHiddenFiles is false
+                if (file.is_hidden && !globalStateBundle.showHiddenFiles) {
+                    globalStateBundle.fileGrid.appendChild(uiManager.createPlaceholderElement()); // Add placeholder for hidden file
+                    continue;
+                    }
+
+                const fileItemElement = uiManager.createFileItemElement(file, globalStateBundle.selectFile, {
+                    displayRatingCategory: globalStateBundle.persistedDisplayRatingCategory,
+                    showHiddenFiles: globalStateBundle.showHiddenFiles
+                });
+                globalStateBundle.fileGrid.appendChild(fileItemElement);
+            } else {
+                // Append a placeholder if file data is missing for some reason
+                globalStateBundle.fileGrid.appendChild(uiManager.createPlaceholderElement());
+            }
+        }
+        console.log(`Rendered items from ${newStartIndex} to ${newEndIndex}.`);
+    };
+
+    if (immediate) {
+        console.log(`Immediate render requested.`);
+        _performGridRender();
+    } else {
+        if (renderLoopId) {
+            cancelAnimationFrame(renderLoopId);
+        }
+        console.log(`Scheduling render via requestAnimationFrame.`);
+        renderLoopId = requestAnimationFrame(_performGridRender);
+    }
+}
+
+
+/**
+ * Scrolls the virtualized container to make a specific file item visible.
+ * @param {object} file - The file object to scroll to.
+ */
+function scrollToFile(file) {
+    if (!globalStateBundle.virtualizedScrollContainer || !globalStateBundle.fileGrid || !globalStateBundle.currentFiles) {
+        return;
+    }
+
+    const fileIndex = globalStateBundle.currentFiles.findIndex(f => f.path === file.path);
+    if (fileIndex === -1) {
+        console.warn('File not found in currentFiles for scrolling:', file.path);
+        return;
+    }
+
+    const rowIndex = Math.floor(fileIndex / numColsVisible);
+    const targetScrollTop = rowIndex * rowHeight;
+
+    // Adjust targetScrollTop to ensure the item is fully visible within the viewport,
+    // considering overscan and current scroll position
+    const currentScrollTop = globalStateBundle.virtualizedScrollContainer.scrollTop;
+    const viewportHeight = globalStateBundle.virtualizedScrollContainer.clientHeight;
+
+    if (targetScrollTop < currentScrollTop || targetScrollTop + rowHeight > currentScrollTop + viewportHeight) {
+        // Only scroll if the item is outside the current viewport
+        globalStateBundle.virtualizedScrollContainer.scrollTo({
+            top: targetScrollTop,
+            behavior: 'smooth'
+        });
+    }
+}
 
 
 /**
@@ -218,6 +436,9 @@ function setupEventListeners() {
         if (domElementsBundle.focusOverlay?.style.display === 'flex' && globalStateBundle.currentFocusedFile) {
             focusWindowManager.updateFocusWindowDimensions(globalStateBundle.currentFocusedFile);
         }
+        // Also recalculate grid dimensions and re-render on window resize
+        globalStateBundle.calculateGridDimensions(); // Use globalStateBundle
+        globalStateBundle.renderVirtualizedGrid(); // Re-render after resize (can be deferred)
     });
 
     // Gallery zoom slider event listener
@@ -244,7 +465,7 @@ function setupEventListeners() {
             if (newTag) {
                 filterManager.addFilterTag(newTag);
                 this.value = '';
-                filterManager.renderSuggestedFilterTags([]);
+                filterManager.renderSuggestedTags([]);
             }
         }
     });
@@ -346,6 +567,9 @@ function setupEventListeners() {
             }
         });
     });
+
+    // Add scroll listener for virtualization
+    globalStateBundle.virtualizedScrollContainer?.addEventListener('scroll', () => globalStateBundle.renderVirtualizedGrid(false)); // Pass false for deferred render
 }
 
 
@@ -436,6 +660,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     currentPathSpan = document.getElementById('currentPath');
     statusBar = document.getElementById('statusBar');
     tagInput = document.getElementById('tagInput');
+    virtualizedScrollContainer = document.getElementById('virtualizedScrollContainer'); // NEW
 
     // Assign NEW DOM elements for the initial setup modal (local references)
     initialSetupOverlay = document.getElementById('initialSetupOverlay');
@@ -455,6 +680,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         originalFilePreviewUrl, currentGalleryImages, currentGalleryImageIndex,
         currentZoomFactor, currentPanX, currentPanY, focusedMediaElement, isDragging,
         lastMouseX, lastMouseY, currentSortKey, currentSortOrder,
+        virtualizedScrollContainer, fileGrid: fileGridContainer, rowHeight, colWidth, numRowsVisible, numColsVisible,
+        startIndex, endIndex, overscanCount, totalGridHeight, renderLoopId, // Add virtualization variables
+        startIndexRendered: -1, // Initialize for virtualization
+        endIndexRendered: -1,   // Initialize for virtualization
 
         // Expose functions directly as methods on the state bundle for inter-module communication
         refreshFiles: () => fileOperations.refreshFiles(),
@@ -464,7 +693,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         displayGalleryImageInFocus: (url, thumb) => focusWindowManager.displayGalleryImageInFocus(url, thumb),
         updateFolderVisibility: () => uiManager.updateFolderVisibility(),
         selectFile: (file, element) => fileDetailsManager.selectFile(file, element),
-        handleFolderClickInConfigMode: (path, element) => settingsManager.handleFolderClickInConfigMode(path, element)
+        handleFolderClickInConfigMode: (path, element) => settingsManager.handleFolderClickInConfigMode(path, element),
+        scrollToFile: (file) => scrollToFile(file), // Expose scrollToFile
+        calculateGridDimensions: calculateGridDimensions, // Expose calculateGridDimensions
+        renderVirtualizedGrid: renderVirtualizedGrid, // Expose renderVirtualizedGrid
+        updateStatusBar: uiManager.updateStatusBar // Expose updateStatusBar from uiManager
     };
 
     domElementsBundle = {
@@ -473,7 +706,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         hideFileButton, openGalleryAutomaticallyCheckbox, galleryZoomSlider, focusFileNameDisplay,
         contextMenu, contextMenuOpenFileLocation, zoomSlider, zoomPercentSpan,
         displayRatingCategoryDropdown, fileGridContainer, folderTreeContainer, currentPathSpan,
-        statusBar, tagInput
+        statusBar, tagInput, virtualizedScrollContainer // Add virtualizedScrollContainer
     };
 
     // Ensure the focus overlay and file details are hidden initially by inline style
@@ -540,12 +773,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             // Debugging log: Check allRatingDefinitions after initial load
             console.log('DEBUG: globalStateBundle.allRatingDefinitions after initial loadRatingConfig:', globalStateBundle.allRatingDefinitions);
 
-            // Populate the display rating category dropdown using the loaded definitions.
-            // Corrected mapping: Directly use the string if it's a string, or def.name if it's an object
+            // Populate dropdown with actual loaded rating definitions.
             if (globalStateBundle.allRatingDefinitions && Array.isArray(globalStateBundle.allRatingDefinitions) && globalStateBundle.allRatingDefinitions.length > 0) {
                 const ratingNames = globalStateBundle.allRatingDefinitions
                     .map(def => typeof def === 'string' ? def : (typeof def === 'object' && def !== null && typeof def.name === 'string' ? def.name : null))
-                    .filter(name => name !== null); // Filter out any nulls resulting from invalid 'def' or 'def.name'
+                    .filter(name => name !== null);
 
                 console.log('DEBUG: Populating dropdown with (initial load):', ratingNames);
                 uiManager.populateDisplayRatingCategoryDropdown(ratingNames);

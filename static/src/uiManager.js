@@ -92,178 +92,199 @@ export function renderFolderTree(folders, container, selectFolderCallback) {
 }
 
 /**
- * Renders the given array of files into the file grid.
- * @param {Array} files - Array of file objects to render.
+ * Creates a single file item DOM element.
+ * @param {object} file - The file object to render.
  * @param {function} selectFileCallback - Callback function for selecting a file.
- * @param {object} options - Object containing rendering options (e.g., displayRatingCategory, hideFolders, showHiddenFiles).
+ * @param {object} options - Object containing rendering options (e.g., displayRatingCategory, showHiddenFiles).
+ * @returns {HTMLElement} The created file item DOM element.
  */
-export function renderFiles(files, selectFileCallback, options) {
-    const grid = document.getElementById('fileGrid');
-    grid.innerHTML = ''; // Clear existing grid items
+export function createFileItemElement(file, selectFileCallback, options) {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    item.dataset.path = file.path; // Store file path as a data attribute
 
-    const displayRatingCategory = options.displayRatingCategory;
+    const iconContainer = document.createElement('div');
+    iconContainer.className = 'file-icon-container';
 
-    files.forEach(file => {
-        // Skip rendering folders if hideFolders is true (handled by backend, but double-check)
-        if (options.hideFolders && file.is_directory) {
-            return;
-        }
-        // Skip rendering hidden files if showHiddenFiles is false (handled by backend, but double-check)
-        if (file.is_hidden && !options.showHiddenFiles) {
-            return;
-        }
+    const icon = document.createElement('div');
+    icon.className = 'file-icon';
 
-        const item = document.createElement('div');
-        item.className = 'file-item';
-        item.dataset.path = file.path; // Store file path as a data attribute
+    if (file.is_directory) {
+        icon.classList.add('folder-icon');
+        icon.textContent = '📁';
+    } else if (file.mime_type && file.mime_type.startsWith('image/') || file.extension === '.webp' || file.extension === '.safetensors' || file.is_missing) {
+        // Prioritize preview_image_path if available, especially for missing files
+        const imageSource = file.preview_image_path ? `/api/thumbnail/${encodeURIComponent(file.preview_image_path)}` : `/api/thumbnail/${encodeURIComponent(file.path)}`;
 
-        const iconContainer = document.createElement('div');
-        iconContainer.className = 'file-icon-container';
-
-        const icon = document.createElement('div');
-        icon.className = 'file-icon';
-
-        if (file.is_directory) {
-            icon.classList.add('folder-icon');
-            icon.textContent = '📁';
-        } else if (file.mime_type && file.mime_type.startsWith('image/') || file.extension === '.webp' || file.extension === '.safetensors' || file.is_missing) {
-            // Prioritize preview_image_path if available, especially for missing files
-            const imageSource = file.preview_image_path ? `/api/thumbnail/${encodeURIComponent(file.preview_image_path)}` : `/api/thumbnail/${encodeURIComponent(file.path)}`;
-
-            icon.classList.add('image');
-            const img = document.createElement('img');
-            img.className = 'thumbnail-image';
-            img.src = imageSource;
-            img.onerror = function() {
-                this.style.display = 'none'; // Hide broken image
-                // Fallback icon based on primary file type
-                if (file.extension === '.safetensors') {
-                    icon.textContent = '📦'; // Package icon for safetensors
-                } else if (file.extension === '.webp') {
-                    icon.textContent = '🖼️'; // Image icon for webp
-                } else if (file.is_missing) {
-                    icon.textContent = '❓'; // Missing file icon
-                } else {
-                    icon.textContent = '🖼️'; // Generic image icon
-                }
-            };
-            icon.appendChild(img);
-
-            // Add missing sash if the file is marked as missing
-            if (file.is_missing) {
-                const missingSash = document.createElement('div');
-                missingSash.className = 'missing-sash';
-                missingSash.textContent = 'MISSING';
-                iconContainer.appendChild(missingSash);
-            }
-
-        } else if (file.mime_type && file.mime_type.startsWith('video/')) {
-            // For video, also prioritize preview_image_path if it's a static image thumbnail
-            const videoSource = file.preview_image_path ? `/api/thumbnail/${encodeURIComponent(file.preview_image_path)}` : `/api/thumbnail/${encodeURIComponent(file.path)}`;
-
-            icon.classList.add('image'); // Use 'image' class for styling consistency
-            const videoContainer = document.createElement('div');
-            videoContainer.className = 'video-thumbnail';
-
-            const video = document.createElement('video');
-            video.src = videoSource;
-            video.muted = true;
-            video.preload = 'metadata';
-
-            const overlay = document.createElement('div');
-            overlay.className = 'video-overlay';
-            overlay.textContent = '▶';
-
-            videoContainer.appendChild(video);
-            videoContainer.appendChild(overlay);
-            icon.appendChild(videoContainer);
-
-            // Load video frame (only if not using a static preview image)
-            if (!file.preview_image_path) {
-                video.addEventListener('loadedmetadata', function() {
-                    video.currentTime = Math.min(1, video.duration * 0.1);
-                });
-            }
-
-            video.onerror = function() {
-                videoContainer.style.display = 'none';
-                icon.textContent = '';
-            };
-        } else if (file.mime_type && (file.mime_type.includes('document') || file.mime_type.includes('pdf') || file.mime_type.includes('text'))) {
-            icon.classList.add('document');
-            icon.textContent = '📄';
-        } else {
-            icon.classList.add('default');
-            icon.textContent = '📄';
-        }
-
-        const name = document.createElement('div');
-        name.className = 'file-name';
-        name.textContent = file.name;
-
-        iconContainer.appendChild(icon);
-        item.appendChild(iconContainer);
-        item.appendChild(name);
-
-        // Add combined info overlay (rating and tags) for files (not directories)
-        if (!file.is_directory) {
-            const infoOverlay = document.createElement('div');
-            infoOverlay.className = 'info-overlay';
-
-            // Rating display
-            if (displayRatingCategory !== 'none') {
-                const rating = file.ratings ? (file.ratings[displayRatingCategory] || 0) : 0;
-                const ratingDisplay = document.createElement('div');
-                ratingDisplay.className = 'rating-display';
-                ratingDisplay.innerHTML = `<span class="star-display">${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}</span>`;
-                infoOverlay.appendChild(ratingDisplay);
-            }
-
-            // Tags display
-            if (file.tags) {
-                const tagsArray = file.tags.split(',').map(tag => tag.trim()).filter(tag => tag !== '');
-                if (tagsArray.length > 0) {
-                    const tagsDisplay = document.createElement('div');
-                    tagsDisplay.className = 'tags-display';
-                    // Display a limited number of tags
-                    tagsArray.slice(0, globalState.MAX_TAGS_ON_ICON).forEach(tag => {
-                        const tagPill = document.createElement('span');
-                        tagPill.className = 'tag-pill';
-                        tagPill.textContent = tag;
-                        tagsDisplay.appendChild(tagPill);
-                    });
-                    infoOverlay.appendChild(tagsDisplay);
-                }
-            }
-            if (infoOverlay.children.length > 0) { // Only add if it has content
-                iconContainer.appendChild(infoOverlay);
-            }
-        }
-
-        // Add hidden overlay if the file is hidden and showHiddenFiles is true
-        if (file.is_hidden && options.showHiddenFiles) {
-            const hiddenOverlay = document.createElement('div');
-            hiddenOverlay.className = 'hidden-overlay';
-            const hiddenSashLine = document.createElement('div'); // New inner div for the sash
-            hiddenSashLine.className = 'hidden-sash-line';
-            hiddenSashLine.textContent = 'HIDDEN';
-            hiddenOverlay.appendChild(hiddenSashLine); // Append sash to overlay
-            iconContainer.appendChild(hiddenOverlay);
-        }
-
-        // Event listeners for file selection and opening
-        item.addEventListener('click', () => selectFileCallback(file, item));
-        item.addEventListener('dblclick', (e) => {
-            e.stopPropagation(); // Stop propagation to prevent immediate close of focus window if already open
-            if (file.is_directory) {
-                globalState.navigateToFolder(file.path); // Call navigation function from global scope
+        icon.classList.add('image');
+        const img = document.createElement('img');
+        img.className = 'thumbnail-image';
+        img.src = imageSource;
+        img.onerror = function() {
+            this.style.display = 'none'; // Hide broken image
+            // Fallback icon based on primary file type
+            if (file.extension === '.safetensors') {
+                icon.textContent = '📦'; // Package icon for safetensors
+            } else if (file.extension === '.webp') {
+                icon.textContent = '🖼️'; // Image icon for webp
+            } else if (file.is_missing) {
+                icon.textContent = '❓'; // Missing file icon
             } else {
-                globalState.openFocusWindow(file); // Call focus window function from global scope
+                icon.textContent = '🖼️'; // Generic image icon
+            }
+        };
+        icon.appendChild(img);
+
+        // Add missing sash if the file is marked as missing
+        if (file.is_missing) {
+            const missingSash = document.createElement('div');
+            missingSash.className = 'missing-sash';
+            missingSash.textContent = 'MISSING';
+            iconContainer.appendChild(missingSash);
+        }
+
+    } else if (file.mime_type && file.mime_type.startsWith('video/')) {
+        // For video, also prioritize preview_image_path if it's a static image thumbnail
+        const videoSource = file.preview_image_path ? `/api/thumbnail/${encodeURIComponent(file.preview_image_path)}` : `/api/thumbnail/${encodeURIComponent(file.path)}`;
+
+        icon.classList.add('image'); // Use 'image' class for styling consistency
+        const videoContainer = document.createElement('div');
+        videoContainer.className = 'video-thumbnail';
+
+        const video = document.createElement('video');
+        video.src = videoSource;
+        video.muted = true;
+        video.preload = 'metadata'; // Good practice: loads dimensions and duration without the video data.
+        video.loop = true; // Loop the preview while hovering
+
+        const overlay = document.createElement('div');
+        overlay.className = 'video-overlay';
+        overlay.textContent = '▶';
+
+        videoContainer.appendChild(video);
+        videoContainer.appendChild(overlay);
+        icon.appendChild(videoContainer);
+
+        // --- OPTIMIZATION: Play/Pause on hover instead of loading a frame for every video ---
+        videoContainer.addEventListener('mouseenter', () => {
+            // Show the play overlay only if we are not using a static image
+            if (!file.preview_image_path) {
+                overlay.style.opacity = '0';
+                video.play().catch(e => console.error("Video play failed:", e)); // Play video on hover
             }
         });
 
-        grid.appendChild(item);
+        videoContainer.addEventListener('mouseleave', () => {
+            // Show the play overlay again
+            if (!file.preview_image_path) {
+                overlay.style.opacity = '1';
+                video.pause();
+                video.currentTime = 0; // Reset to the beginning
+            }
+        });
+        // --- END OPTIMIZATION ---
+
+        video.onerror = function() {
+            videoContainer.style.display = 'none';
+            icon.textContent = '🎥'; // Fallback video icon
+        };
+    } else if (file.mime_type && (file.mime_type.includes('document') || file.mime_type.includes('pdf') || file.mime_type.includes('text'))) {
+        icon.classList.add('document');
+        icon.textContent = '📄';
+    } else {
+        icon.classList.add('default');
+        icon.textContent = '📄';
+    }
+
+    const name = document.createElement('div');
+    name.className = 'file-name';
+    name.textContent = file.name;
+
+    iconContainer.appendChild(icon);
+    item.appendChild(iconContainer);
+    item.appendChild(name);
+
+    // Add combined info overlay (rating and tags) for files (not directories)
+    if (!file.is_directory) {
+        const infoOverlay = document.createElement('div');
+        infoOverlay.className = 'info-overlay';
+
+        // Rating display
+        if (options.displayRatingCategory !== 'none') {
+            const rating = file.ratings ? (file.ratings[options.displayRatingCategory] || 0) : 0;
+            const ratingDisplay = document.createElement('div');
+            ratingDisplay.className = 'rating-display';
+            ratingDisplay.innerHTML = `<span class="star-display">${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}</span>`;
+            infoOverlay.appendChild(ratingDisplay);
+        }
+
+        // Tags display
+        if (file.tags) {
+            const tagsArray = file.tags.split(',').map(tag => tag.trim()).filter(tag => tag !== '');
+            if (tagsArray.length > 0) {
+                const tagsDisplay = document.createElement('div');
+                tagsDisplay.className = 'tags-display';
+                // Display a limited number of tags
+                tagsArray.slice(0, globalState.MAX_TAGS_ON_ICON).forEach(tag => {
+                    const tagPill = document.createElement('span');
+                    tagPill.className = 'tag-pill';
+                    tagPill.textContent = tag;
+                    tagsDisplay.appendChild(tagPill);
+                });
+                infoOverlay.appendChild(tagsDisplay);
+            }
+        }
+        if (infoOverlay.children.length > 0) { // Only add if it has content
+            iconContainer.appendChild(infoOverlay);
+        }
+    }
+
+    // Add hidden overlay if the file is hidden and showHiddenFiles is true
+    if (file.is_hidden && options.showHiddenFiles) {
+        const hiddenOverlay = document.createElement('div');
+        hiddenOverlay.className = 'hidden-overlay';
+        const hiddenSashLine = document.createElement('div'); // New inner div for the sash
+        hiddenSashLine.className = 'hidden-sash-line';
+        hiddenSashLine.textContent = 'HIDDEN';
+        hiddenOverlay.appendChild(hiddenSashLine); // Append sash to overlay
+        iconContainer.appendChild(hiddenOverlay);
+    }
+
+    // Event listener for single click on file items
+    item.addEventListener('click', () => {
+        // Always select the file to update the details panel
+        selectFileCallback(file, item);
+
+        if (file.is_directory) {
+            // If it's a directory, navigate into it
+            globalState.navigateToFolder(file.path);
+        } else {
+            // If it's a file, open the focus window
+            globalState.openFocusWindow(file);
+        }
     });
+
+    // Removed the dblclick listener as single click now handles both navigation and focus window opening
+
+    return item;
+}
+
+/**
+ * Creates a placeholder DOM element for virtualized scrolling.
+ * @returns {HTMLElement} The created placeholder element.
+ */
+export function createPlaceholderElement() {
+    const template = document.getElementById('fileItemPlaceholderTemplate');
+    if (template) {
+        return template.content.cloneNode(true).firstElementChild;
+    }
+    const placeholder = document.createElement('div');
+    placeholder.className = 'file-item-placeholder';
+    placeholder.innerHTML = `
+        <div class="file-icon-container"></div>
+        <div class="file-name"></div>
+    `;
+    return placeholder;
 }
 
 /**
@@ -389,16 +410,25 @@ export function updateStatusBar(text) {
 
 /**
  * Shows or hides the loading indicator.
+ * Also clears the file grid and resets scroll position when showing loading.
  * @param {boolean} show - True to show, false to hide.
  */
 export function showLoading(show) {
     const loading = document.getElementById('loading');
     const grid = document.getElementById('fileGrid');
+    const scrollContainer = document.getElementById('virtualizedScrollContainer');
 
-    if (loading && grid) {
+    if (loading && grid && scrollContainer) {
         if (show) {
             loading.classList.remove('hidden');
             grid.style.opacity = '0.5'; // Dim the grid while loading
+            grid.innerHTML = ''; // Explicitly clear the grid content
+            scrollContainer.scrollTop = 0; // Reset scroll position to top
+
+            // Force reflow to ensure the browser processes the DOM changes immediately
+            // before any subsequent rendering attempts.
+            grid.offsetHeight; // Reading a layout-related property forces a reflow
+            scrollContainer.offsetHeight; // Also force reflow for scroll container
         } else {
             loading.classList.add('hidden');
             grid.style.opacity = '1'; // Restore opacity

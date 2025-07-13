@@ -98,7 +98,10 @@
         </div>
 
         <div class="content-area">
-            <div id="fileGrid" class="file-grid medium"></div>
+            <!-- Virtualized grid container -->
+            <div id="virtualizedScrollContainer" class="virtualized-scroll-container">
+                <div id="fileGrid" class="file-grid"></div>
+            </div>
             <div id="loading" class="loading hidden">Loading...</div>
         </div>
     </div>
@@ -242,6 +245,14 @@
         <div id="contextMenuOpenFileLocation" class="context-menu-item">Open File Location</div>
         <!-- Add more context menu items here if needed -->
     </div>
+
+    <!-- Template for file item placeholder -->
+    <template id="fileItemPlaceholderTemplate">
+        <div class="file-item-placeholder">
+            <div class="file-icon-container"></div>
+            <div class="file-name"></div>
+        </div>
+    </template>
 
     <!-- Link to external JavaScript file -->
     <script type="module" src="/static/script.js"></script>

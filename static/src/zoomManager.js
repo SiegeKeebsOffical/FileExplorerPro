@@ -23,6 +23,10 @@ export function initializeZoomManager(globalState) {
             localStorage.setItem('zoomLevel', globalState.zoomLevel);
             updateZoomDisplay(globalState);
             applyZoomToGrid(globalState);
+            // Trigger re-render of the virtualized grid after zoom changes
+            if (globalState.calculateGridDimensions) {
+                globalState.calculateGridDimensions();
+            }
         });
     }
 }
@@ -40,6 +44,10 @@ export function zoomIn(globalState) {
         localStorage.setItem('zoomLevel', globalState.zoomLevel);
         updateZoomDisplay(globalState);
         applyZoomToGrid(globalState);
+        // Trigger re-render of the virtualized grid after zoom changes
+        if (globalState.calculateGridDimensions) {
+            globalState.calculateGridDimensions();
+        }
     }
 }
 
@@ -56,6 +64,10 @@ export function zoomOut(globalState) {
         localStorage.setItem('zoomLevel', globalState.zoomLevel);
         updateZoomDisplay(globalState);
         applyZoomToGrid(globalState);
+        // Trigger re-render of the virtualized grid after zoom changes
+        if (globalState.calculateGridDimensions) {
+            globalState.calculateGridDimensions();
+        }
     }
 }
 
@@ -78,7 +90,7 @@ function updateZoomDisplay(globalState) {
  * @param {number} displayedPercentage - The percentage value from the zoom slider (10-500).
  * @returns {number} The actual CSS scaling factor to apply.
  */
-function calculateCssZoomFactor(displayedPercentage) {
+export function calculateCssZoomFactor(displayedPercentage) {
     let cssFactor;
     if (displayedPercentage <= 100) {
         // Segment 1: From (10, 1) to (100, 5)
@@ -88,7 +100,7 @@ function calculateCssZoomFactor(displayedPercentage) {
     } else {
         // Segment 2: From (100, 5) to (500, 10)
         // Slope m = (10 - 5) / (500 - 100) = 5 / 400 = 1/80
-        // Equation: F - F1 = m * (S - S1) => F = F1 + m * (S - S1)
+        // Equation: F - F1 = m * (S - S1) => F = F1 + F1 + m * (S - S1)
         cssFactor = 5 + (1 / 80) * (displayedPercentage - 100);
     }
     // Ensure the factor is not less than 0.1 (or some sensible minimum)

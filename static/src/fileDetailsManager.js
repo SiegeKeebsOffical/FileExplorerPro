@@ -2,7 +2,6 @@
 
 // Removed imports for sdMetadataIntegration.js as it's being replaced
 import { generateMetadataDisplayHtml, fetchAndDisplayAssociatedMetadata } from './metadataLoader.js'; // Import new function
-import { updateStatusBar, showLoading, highlightCurrentFolder, renderFiles } from './uiManager.js';
 import { basename, showCustomConfirm } from './utils.js'; // For basename and showCustomConfirm
 import { openFocusWindow, closeFocusWindow } from './focusWindowManager.js'; // Import from focusWindowManager
 
@@ -46,48 +45,52 @@ export async function selectFile(file, element) {
     // Update currentFileIndex for navigation
     globalState.currentFileIndex = globalState.currentFiles.findIndex(f => f.path === file.path);
 
-    // --- ADDED LOGGING ---
-    console.log(`DEBUG: selectFile called for ${file.name}. Initial category: ${file.category}, is_category_manual: ${file.is_category_manual}`);
-    // --- END ADDED LOGGING ---
+    console.log(`DEBUG: selectFile called for ${file.name} (Type: ${file.is_directory ? 'Directory' : 'File'}). Initial category: ${file.category}, is_category_manual: ${file.is_category_manual}`);
 
     // Apply smart categorization if needed (this can trigger showFileDetails again)
     // Only attempt to apply smart category if the file is NOT missing and not already categorized manually
     if (!file.is_directory && (!file.category || file.category === '') && !file.is_category_manual) {
-        console.log(`Attempting to apply smart category for ${file.name}`);
+        console.log(`DEBUG: Attempting to apply smart category for ${file.name}`);
         await applySmartCategoryToSelectedFile(file);
+    } else {
+        console.log(`DEBUG: Skipping smart category for ${file.name}. Category: ${file.category}, Manual: ${file.is_category_manual}`);
     }
 
     // Always show file details initially (with or without workflow metadata yet)
-    await showFileDetails(globalState.selectedFile); // Use globalState.selectedFile as it might have been updated by smart category
+    // Use globalState.selectedFile as it might have been updated by smart category
+    console.log(`DEBUG: Calling showFileDetails for ${globalState.selectedFile.name}`);
+    await showFileDetails(globalState.selectedFile);
 
     // Only attempt to open the focus window if it's NOT a directory
     if (!globalState.selectedFile.is_directory) {
         const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.webm'];
         // Check if it's an image, doesn't have workflow metadata yet, AND is NOT missing
         if (imageExtensions.includes(globalState.selectedFile.extension) && !globalState.selectedFile.workflow_metadata && !globalState.selectedFile.is_missing) {
-            updateStatusBar('Extracting workflow metadata...');
+            globalState.updateStatusBar('Extracting workflow metadata...');
             try {
                 const response = await fetch(`/api/image_workflow_metadata?filepath=${encodeURIComponent(globalState.selectedFile.path)}`);
                 const result = await response.json();
 
                 if (result.success && result.workflow_metadata) {
                     globalState.selectedFile.workflow_metadata = result.workflow_metadata;
-                    updateStatusBar('Workflow metadata extracted and displayed.');
+                    globalState.updateStatusBar('Workflow metadata extracted and displayed.');
                     // Re-render details to show the new workflow metadata
                     await showFileDetails(globalState.selectedFile);
                 } else {
-                    updateStatusBar(`Failed to extract workflow metadata: ${result.error || 'No workflow found.'}`);
+                    globalState.updateStatusBar(`Failed to extract workflow metadata: ${result.error || 'No workflow found.'}`);
                     console.warn(`Failed to extract workflow metadata for ${globalState.selectedFile.name}: ${result.error || 'No workflow found.'}`);
                 }
             } catch (error) {
                 console.error('Network error during workflow metadata extraction:', error);
-                updateStatusBar('Network error during workflow metadata extraction.');
+                globalState.updateStatusBar('Network error during workflow metadata extraction.');
             } finally {
-                setTimeout(() => updateStatusBar('Ready'), 2000);
+                setTimeout(() => globalState.updateStatusBar('Ready'), 2000);
             }
         }
+        console.log(`DEBUG: Opening focus window for ${globalState.selectedFile.name}`);
         openFocusWindow(globalState.selectedFile); // Open or update the content of the focus window
     } else {
+        console.log(`DEBUG: Closing focus window as ${globalState.selectedFile.name} is a directory.`);
         closeFocusWindow(); // Close focus window if a directory is selected
     }
 }
@@ -199,7 +202,7 @@ function addWorkflowMetadataCopyButtons(container) {
 function copyTextToClipboard(text) {
     if (window.isSecureContext) { // navigator.clipboard is only available in secure contexts (HTTPS)
         navigator.clipboard.writeText(text).then(function() {
-            updateStatusBar('Copied to clipboard!');
+            globalState.updateStatusBar('Copied to clipboard!');
         }, function(err) {
             console.error('Could not copy text: ', err);
             // Fallback for non-secure contexts or failures
@@ -224,10 +227,10 @@ function fallbackCopyTextToClipboard(text) {
     try {
         const successful = document.execCommand('copy');
         const msg = successful ? 'Copied to clipboard!' : 'Failed to copy!';
-        updateStatusBar(msg);
+        globalState.updateStatusBar(msg);
     } catch (err) {
         console.error('Fallback: Oops, unable to copy', err);
-        updateStatusBar('Failed to copy to clipboard.');
+        globalState.updateStatusBar('Failed to copy to clipboard.');
     }
     document.body.removeChild(textArea);
 }
@@ -237,6 +240,8 @@ function fallbackCopyTextToClipboard(text) {
  * @param {object} file - The file object whose details are to be displayed.
  */
 export async function showFileDetails(file) {
+    console.log(`DEBUG: showFileDetails called for ${file.name}.`);
+
     // Helper function to format file size
     const formatSize = (bytes) => {
         if (bytes === 0) return '0 Bytes';
@@ -251,7 +256,12 @@ export async function showFileDetails(file) {
         if (isoString === "0001-01-01T00:00:00") { // Placeholder for actual min date string from Python
             return 'N/A';
         }
-        return new Date(isoString).toLocaleString();
+        try {
+            return new Date(isoString).toLocaleString();
+        } catch (e) {
+            console.error("Error parsing date string:", isoString, e);
+            return 'Invalid Date';
+        }
     };
 
     // Generate HTML for generic associated metadata
@@ -288,158 +298,168 @@ export async function showFileDetails(file) {
         `;
     }
 
-    // Populate the details content
-    globalState.detailsContent.innerHTML = `
-        ${metadataErrorHtml}
-        <div class="metadata-section">
-            <h3>File Information</h3>
-            <p><strong>Name:</strong> ${file.name} ${file.is_missing ? '(Missing Primary File)' : ''}</p>
-            <p><strong>Size:</strong> ${file.is_directory ? 'Folder' : formatSize(file.size)}</p>
-            <p><strong>Type:</strong> ${file.mime_type || 'Unknown'}</p>
-            <p><strong>Modified:</strong> ${formatDate(file.modified)}</p>
-            <p><strong>Created:</strong> ${formatDate(file.created)}</p>
-            ${file.preview_image_path ? `<p><strong>Preview Image:</strong> ${basename(file.preview_image_path)}</p>` : ''}
-        </div>
-
-        <div class="metadata-section">
-            <h3>Suggested Tags</h3>
-            <div id="suggestedTagsContainer" class="suggested-tags-box"></div>
-        </div>
-
-        <div class="metadata-section">
-            <h3>Tags</h3>
-            <div id="currentTagsContainer" class="tag-container"></div>
-            <div class="metadata-field">
-                <input type="text" id="tagInput" placeholder="Add tags (comma or enter to add)...">
+    try {
+        // Populate the details content
+        globalState.detailsContent.innerHTML = `
+            ${metadataErrorHtml}
+            <div class="metadata-section">
+                <h3>File Information</h3>
+                <p><strong>Name:</strong> ${file.name} ${file.is_missing ? '(Missing Primary File)' : ''}</p>
+                <p><strong>Size:</strong> ${file.is_directory ? 'Folder' : formatSize(file.size)}</p>
+                <p><strong>Type:</strong> ${file.mime_type || 'Unknown'}</p>
+                <p><strong>Modified:</strong> ${formatDate(file.modified)}</p>
+                <p><strong>Created:</strong> ${formatDate(file.created)}</p>
+                ${file.preview_image_path ? `<p><strong>Preview Image:</strong> ${basename(file.preview_image_path)}</p>` : ''}
             </div>
-        </div>
 
-        ${ratingsHtml}
-
-        <div class="metadata-section">
-            <h3>Category</h3>
-            <div class="metadata-field">
-                <select id="fileCategory">
-                    <option value="">None</option>
-                    ${globalState.allFileCategories.map(cat => `<option value="${cat}" ${file.category === cat ? 'selected' : ''}>${cat.charAt(0).toUpperCase() + cat.slice(1)}</option>`).join('')}
-                </select>
-                ${file.is_category_manual ? '<span style="font-size: 0.8em; color: #0078d4; margin-left: 5px;">(Manually Set)</span>' : '<span style="font-size: 0.8em; color: #666; margin-left: 5px;">(Auto-Assigned)</span>'}
+            <div class="metadata-section">
+                <h3>Suggested Tags</h3>
+                <div id="suggestedTagsContainer" class="suggested-tags-box"></div>
             </div>
-        </div>
 
-        <div class="metadata-section">
-            <h3>Notes</h3>
-            <div class="metadata-field">
-                <textarea id="fileNotes" rows="3" placeholder="Add notes...">${file.notes || ''}</textarea>
+            <div class="metadata-section">
+                <h3>Tags</h3>
+                <div id="currentTagsContainer" class="tag-container"></div>
+                <div class="metadata-field">
+                    <input type="text" id="tagInput" placeholder="Add tags (comma or enter to add)...">
+                </div>
             </div>
-        </div>
 
-        ${customGalleryKeywordHtml}
+            ${ratingsHtml}
 
-        ${workflowMetadataHtml}
-        ${associatedMetadataHtml}
+            <div class="metadata-section">
+                <h3>Category</h3>
+                <div class="metadata-field">
+                    <select id="fileCategory">
+                        <option value="">None</option>
+                        ${globalState.allFileCategories.map(cat => `<option value="${cat}" ${file.category === cat ? 'selected' : ''}>${cat.charAt(0).toUpperCase() + cat.slice(1)}</option>`).join('')}
+                    </select>
+                    ${file.is_category_manual ? '<span style="font-size: 0.8em; color: #0078d4; margin-left: 5px;">(Manually Set)</span>' : '<span style="font-size: 0.8em; color: #666; margin-left: 5px;">(Auto-Assigned)</span>'}
+                </div>
+            </div>
+
+            <div class="metadata-section">
+                <h3>Notes</h3>
+                <div class="metadata-field">
+                    <textarea id="fileNotes" rows="3" placeholder="Add notes...">${file.notes || ''}</textarea>
+                </div>
+            </div>
+
+            ${customGalleryKeywordHtml}
+
+            ${workflowMetadataHtml}
+            ${associatedMetadataHtml}
 
 
-        <button id="saveMetadataBtnDynamic" style="width: 100%; padding: 8px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer;">Save Changes</button>
-    `;
+            <button id="saveMetadataBtnDynamic" style="width: 100%; padding: 8px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer;">Save Changes</button>
+        `;
 
-    // Assign customGalleryKeywordInput after it's rendered
-    globalState.customGalleryKeywordInput = document.getElementById('customGalleryKeyword');
+        // Assign customGalleryKeywordInput after it's rendered
+        globalState.customGalleryKeywordInput = document.getElementById('customGalleryKeyword');
 
-    // Add workflow metadata copy buttons
-    addWorkflowMetadataCopyButtons(globalState.detailsContent);
+        // Add workflow metadata copy buttons
+        addWorkflowMetadataCopyButtons(globalState.detailsContent);
 
-    // NEW: Fetch and display associated metadata if a path exists
-    if (file.associated_metadata_path) {
-        const associatedMetadataContainer = document.getElementById('associatedMetadataContent');
-        if (associatedMetadataContainer) {
-            fetchAndDisplayAssociatedMetadata(file.associated_metadata_path, associatedMetadataContainer, updateStatusBar);
+        // NEW: Fetch and display associated metadata if a path exists
+        if (file.associated_metadata_path) {
+            const associatedMetadataContainer = document.getElementById('associatedMetadataContent');
+            if (associatedMetadataContainer) {
+                fetchAndDisplayAssociatedMetadata(file.associated_metadata_path, associatedMetadataContainer, globalState.updateStatusBar);
+            }
         }
-    }
 
 
-    // Attach listener for the dynamically created Save Changes button
-    const saveMetadataButton = document.getElementById('saveMetadataBtnDynamic');
-    if (saveMetadataButton) {
-        saveMetadataButton.addEventListener('click', saveMetadata);
-    }
-
-    // Attach listener for notes textarea to save notes automatically on input
-    const fileNotesTextarea = document.getElementById('fileNotes');
-    if (fileNotesTextarea) {
-        fileNotesTextarea.addEventListener('input', saveNotes);
-    }
-
-    // Update the "Hide File" button text based on the file's hidden status
-    if (globalState.hideFileButton) { // Ensure button exists
-        if (file.is_hidden) {
-            globalState.hideFileButton.textContent = 'Unhide File';
-            globalState.hideFileButton.style.backgroundColor = '#28a745'; // Green for unhide
-        } else {
-            globalState.hideFileButton.textContent = 'Hide File';
-            globalState.hideFileButton.style.backgroundColor = '#dc3545'; // Red for hide
+        // Attach listener for the dynamically created Save Changes button
+        const saveMetadataButton = document.getElementById('saveMetadataBtnDynamic');
+        if (saveMetadataButton) {
+            saveMetadataButton.addEventListener('click', saveMetadata);
         }
-        // Hide the button for directories
-        if (file.is_directory) {
-            globalState.hideFileButton.classList.add('hidden');
-        } else {
-            globalState.hideFileButton.classList.remove('hidden');
+
+        // Attach listener for notes textarea to save notes automatically on input
+        const fileNotesTextarea = document.getElementById('fileNotes');
+        if (fileNotesTextarea) {
+            fileNotesTextarea.addEventListener('input', saveNotes);
         }
-    }
 
-    // Setup rating interaction for all dynamically created rating sections
-    applicableRatingCategories.forEach(ratingCategory => {
-        document.querySelectorAll(`#rating-${ratingCategory} .star`).forEach(star => {
-            star.addEventListener('click', function() {
-                const rating = parseInt(this.dataset.rating);
-                // Get the current rating for this category from the selectedFile object
-                const currentRatingForCategory = globalState.selectedFile.ratings ? (globalState.selectedFile.ratings[ratingCategory] || 0) : 0;
+        // Update the "Hide File" button text based on the file's hidden status
+        if (globalState.hideFileButton) { // Ensure button exists
+            if (file.is_hidden) {
+                globalState.hideFileButton.textContent = 'Unhide File';
+                globalState.hideFileButton.style.backgroundColor = '#28a745'; // Green for unhide
+            } else {
+                globalState.hideFileButton.textContent = 'Hide File';
+                globalState.hideFileButton.style.backgroundColor = '#dc3545'; // Red for hide
+            }
+            // Hide the button for directories
+            if (file.is_directory) {
+                globalState.hideFileButton.classList.add('hidden');
+            } else {
+                globalState.hideFileButton.classList.remove('hidden');
+            }
+        }
 
-                if (rating === currentRatingForCategory) {
-                    // If clicking the current rating, reset to 0
-                    updateFileRating(ratingCategory, 0);
-                } else {
-                    // Otherwise, set to the new rating
-                    updateFileRating(ratingCategory, rating);
-                }
+        // Setup rating interaction for all dynamically created rating sections
+        applicableRatingCategories.forEach(ratingCategory => {
+            document.querySelectorAll(`#rating-${ratingCategory} .star`).forEach(star => {
+                star.addEventListener('click', function() {
+                    const rating = parseInt(this.dataset.rating);
+                    // Get the current rating for this category from the selectedFile object
+                    const currentRatingForCategory = globalState.selectedFile.ratings ? (globalState.selectedFile.ratings[ratingCategory] || 0) : 0;
+
+                    if (rating === currentRatingForCategory) {
+                        // If clicking the current rating, reset to 0
+                        updateFileRating(ratingCategory, 0);
+                    } else {
+                        // Otherwise, set to the new rating
+                        updateFileRating(ratingCategory, rating);
+                    }
+                });
             });
         });
-    });
 
-    // Add event listener for category change to re-render ratings and custom keyword field
-    const fileCategoryDropdown = document.getElementById('fileCategory');
-    if (fileCategoryDropdown) {
-        fileCategoryDropdown.addEventListener('change', function() {
-            // Update selectedFile.category immediately for accurate re-rendering
-            globalState.selectedFile.category = this.value;
-            // Set is_category_manual to 1 (manually set) when user changes category
-            globalState.selectedFile.is_category_manual = 1;
-            console.log(`DEBUG: Category changed to ${this.value}, is_category_manual set to 1. Triggering saveMetadata.`);
-            saveMetadata(); // <--- CRITICAL CHANGE: Call saveMetadata here
-            showFileDetails(globalState.selectedFile); // Re-render details to show correct rating fields, manual flag, and custom keyword field
-        });
-    }
+        // Add event listener for category change to re-render ratings and custom keyword field
+        const fileCategoryDropdown = document.getElementById('fileCategory');
+        if (fileCategoryDropdown) {
+            fileCategoryDropdown.addEventListener('change', function() {
+                // Update selectedFile.category immediately for accurate re-rendering
+                globalState.selectedFile.category = this.value;
+                // Set is_category_manual to 1 (manually set) when user changes category
+                globalState.selectedFile.is_category_manual = 1;
+                console.log(`DEBUG: Category changed to ${this.value}, is_category_manual set to 1. Triggering saveMetadata.`);
+                saveMetadata(); // <--- CRITICAL CHANGE: Call saveMetadata here
+                showFileDetails(globalState.selectedFile); // Re-render details to show correct rating fields, manual flag, and custom keyword field
+            });
+        }
 
-    // Setup tag input
-    const tagInput = document.getElementById('tagInput');
-    if (tagInput) {
-        tagInput.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter' || event.key === ',') {
-                event.preventDefault(); // Prevent default Enter/comma behavior (e.g., form submission)
-                const newTag = tagInput.value.trim();
-                if (newTag) {
-                    addTag(newTag);
-                    tagInput.value = ''; // Clear input
+        // Setup tag input
+        const tagInput = document.getElementById('tagInput');
+        if (tagInput) {
+            tagInput.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' || event.key === ',') {
+                    event.preventDefault(); // Prevent default Enter/comma behavior (e.g., form submission)
+                    const newTag = tagInput.value.trim();
+                    if (newTag) {
+                        addTag(newTag);
+                        tagInput.value = ''; // Clear input
+                    }
                 }
-            }
-        });
+            });
+        }
+
+        // Initial rendering of tags
+        renderCurrentTags();
+        renderSuggestedTags();
+
+        console.log(`DEBUG: Adding 'open' class to fileDetails for ${file.name}.`);
+        globalState.fileDetails.classList.add('open'); // Open the file details panel
+
+    } catch (error) {
+        console.error(`ERROR: Failed to render file details for ${file.name}:`, error);
+        globalState.updateStatusBar(`Error displaying details for ${file.name}.`);
+        // Optionally, close the panel or show a generic error message in the panel
+        globalState.fileDetails.classList.remove('open');
+        globalState.detailsContent.innerHTML = `<div class="metadata-error">Failed to load details for this file. Please check console for errors.</div>`;
     }
-
-    // Initial rendering of tags
-    renderCurrentTags();
-    renderSuggestedTags();
-
-    globalState.fileDetails.classList.add('open'); // Open the file details panel
 }
 
 /**
@@ -648,20 +668,20 @@ export async function saveMetadata() {
             globalState.selectedFile.custom_gallery_keyword = customGalleryKeyword; // Update local object
             globalState.selectedFile.is_hidden = isHidden; // Update local object
 
-            updateStatusBar('Metadata saved successfully');
+            globalState.updateStatusBar('Metadata saved successfully');
             setTimeout(() => {
-                updateStatusBar('Ready');
+                globalState.updateStatusBar('Ready');
             }, 2000);
             // Re-render suggested tags as the current file's tags might have changed
             renderSuggestedTags();
             // Re-render file details to update the (Manually Set)/(Auto-Assigned) label and hide button
             showFileDetails(globalState.selectedFile);
         } else {
-            updateStatusBar('Error saving metadata: ' + (result.error || 'Unknown error'));
+            globalState.updateStatusBar('Error saving metadata: ' + (result.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error saving metadata:', error);
-        updateStatusBar('Error saving metadata');
+        globalState.updateStatusBar('Error saving metadata');
     }
 }
 
@@ -691,16 +711,16 @@ async function saveNotes() {
 
         if (result.success) {
             globalState.selectedFile.notes = notes; // Update local object
-            updateStatusBar('Notes saved automatically.');
+            globalState.updateStatusBar('Notes saved automatically.');
             setTimeout(() => {
-                updateStatusBar('Ready');
+                globalState.updateStatusBar('Ready');
             }, 1500); // Shorter delay for automatic save
         } else {
-            updateStatusBar('Error saving notes: ' + (result.error || 'Unknown error'));
+            globalState.updateStatusBar('Error saving notes: ' + (result.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error saving notes:', error);
-        updateStatusBar('Error saving notes.');
+        globalState.updateStatusBar('Error saving notes.');
     }
 }
 
@@ -734,7 +754,7 @@ export function toggleHideFile() {
             globalState.hideFileButton.style.backgroundColor = '#dc3545'; // Red for hide
         }
         // Hide the button for directories
-        if (file.is_directory) {
+        if (globalState.selectedFile.is_directory) { // Corrected from 'file.is_directory' to 'globalState.selectedFile.is_directory'
             globalState.hideFileButton.classList.add('hidden');
         } else {
             globalState.hideFileButton.classList.remove('hidden');
@@ -756,14 +776,14 @@ export function toggleHideFile() {
 export async function applySmartCategoryToSelectedFile(file) {
     // Do not attempt to smart categorize missing files.
     if (file.is_missing) {
-        console.log(`Skipping smart category for missing file: ${file.name}`);
+        console.log(`DEBUG: Skipping smart category for missing file: ${file.name}`);
         showFileDetails(file); // Still show details for missing file
         return;
     }
 
     // IMPORTANT: Only auto-assign if the category is currently empty AND NOT manually set
     if (file.category && file.category !== '' && file.is_category_manual) {
-        console.log(`Skipping smart category for ${file.name}: Category '${file.category}' is already manually set.`);
+        console.log(`DEBUG: Skipping smart category for ${file.name}: Category '${file.category}' is already manually set.`);
         showFileDetails(file); // Still show details with existing manual category
         return;
     }
@@ -790,7 +810,7 @@ export async function applySmartCategoryToSelectedFile(file) {
     }
 
     if (newCategory) {
-        console.log(`Auto-assigning category for ${file.name}: ${newCategory}`);
+        console.log(`DEBUG: Auto-assigning category for ${file.name}: ${newCategory}`);
         try {
             const response = await fetch('/api/metadata', {
                 method: 'POST',
@@ -815,18 +835,18 @@ export async function applySmartCategoryToSelectedFile(file) {
                 // Update the local selectedFile object with the new category and manual flag
                 globalState.selectedFile.category = newCategory;
                 globalState.selectedFile.is_category_manual = 0; // Ensure local state reflects auto-assigned
-                console.log(`Successfully auto-assigned category for ${file.name}. Re-rendering details.`);
+                console.log(`DEBUG: Successfully auto-assigned category for ${file.name}. Re-rendering details.`);
                 showFileDetails(globalState.selectedFile); // Re-render details to show the new category
             } else {
                 console.error('Error auto-assigning category:', result.error);
-                updateStatusBar('Error auto-assigning category: ' + (result.error || 'Unknown error'));
+                globalState.updateStatusBar('Error auto-assigning category: ' + (result.error || 'Unknown error'));
             }
         } catch (error) {
             console.error('Network error during auto-assignment:', error);
-            updateStatusBar('Network error during auto-assignment.');
+            globalState.updateStatusBar('Network error during auto-assignment.');
         }
     } else {
-        console.log(`No smart category found for ${file.name}.`);
+        console.log(`DEBUG: No smart category found for ${file.name}.`);
         // Still show details even if no auto-category is found
         showFileDetails(file);
     }
