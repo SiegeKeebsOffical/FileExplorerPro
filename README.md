@@ -18,9 +18,13 @@ There's no cloud integration or integration with civitai or comfyui or anything 
 
 ![Rate Files](Images/Rate-Files.webp)
 
+## UPDATES:
+#### Recent Changes:
+- Implemented lazy loading which significantly improves efficiency and responsiveness. It doesn't stream file information, so it still takes a few seconds to load a large folder (13,000 images loaded in about 3 seconds, although the first time load was much slower)
+
 ### Bugs & Features To Do:
 - Metadata viewing for alternative image generation programs
-- "implementing a hybrid of pagination, lazy loading, caching & .db indexing" to reduce RAM usage
+- ~~"implementing a hybrid of pagination, lazy loading, caching & .db indexing" to reduce RAM usage~~
 - UI Fixes
 - Multi-selection and Bulk editing
 - Persistence issue with 'Configure Directories' when new directories are added
